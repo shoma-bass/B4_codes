@@ -1,0 +1,10 @@
+lemma enumR_spec (x : R) : count (pred1 x) enumR = 1.
+proof.
+  rewrite /enumR /polyLX.
+  have hcoeff : is_finite_for predT Zp.DZmodP.Support.enum
+by split=> [|z]; [exact Zp.DZmodP.Support.enum_uniq | rewrite Zp.DZmodP.Support.enumP].
+have hfin := finite_for_polyXnD1 Zp.DZmodP.Support.enum hcoeff.
+move: hfin => [huniq hmem].
+rewrite count_uniq_mem; first exact huniq.
+by rewrite hmem.
+qed.
