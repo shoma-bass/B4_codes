@@ -26,37 +26,28 @@
      (D4) qcsd is axiomatized as the paper's OW (search) problem
           (qcsd_ow_hard). The old decisional DQCSD / negl / parity
           machinery is no longer needed and has been removed.
-
-   *** VERIFICATION STATUS (revision c, 2026-07-03) ***
-     Revision b (all changes below) verified with EasyCrypt r2025.03 /
-     Alt-Ergo, exit 0, no unfinished-proof tokens.
-     REVISION c IS NOT YET MACHINE-CHECKED. Change vs. b:
-       (c1) §3: invp is no longer abstract. It is DEFINED by choice
-            (choiceb) from the new benign axiom Hw_unit ("every weight-d
-            element is a unit", an existence statement). invp_correct is
-            DOWNGRADED FROM AXIOM TO LEMMA. The main theorems are
-            untouched (invp_correct is a support-correctness contract,
-            not used by the game-hopping proofs).
-     Changes of revision b vs. the verified base file:
-       (b1) §3: dHw is no longer abstract. It is now concretely
-            dHw = duniform (filter Hw_elem enumR), i.e. uniform over the
-            weight-d polynomials, matching the spec's Hw sampling.
-            dHw_ll is DOWNGRADED FROM AXIOM TO LEMMA; new lemma dHw_supp
-            pins the support. New benign axiom enumHw_nonempty.
-       (b2) §3: inversion correctness on the keyGen support is pinned
-            (revision b: axiom invp_correct; revision c: lemma, see c1).
-       (b3) parameter axioms annotated by role; unused r_ge3 removed.
-       (b4) benign axioms annotated; candidate discharging proofs live in
-            the companion file finite_facts_WIP.ec (NOT part of the TCB
-            until they go green).
+*** VERIFICATION STATUS (revision e, 2026-07-09) ***
+     REVISION e VERIFIED: EasyCrypt r2025.03 / Alt-Ergo, exit 0
+     (full reload from top, zero admits). Changes from revision d:
+       (e1) §1: enumR_spec DOWNGRADED FROM AXIOM TO LEMMA via
+            polyLX_inj (injectivity on length-r lists, polyLXE +
+            eq_from_nth), enumR_uniq (map_inj_in_uniq + alltuples_uniq),
+            enumR_complete (witness mkseq (fun i => x.[i]) r,
+            alltuplesP + polyXnD1_eqP), count_uniq_mem.
+            mem_enumR now trivially follows from enumR_complete.
      Axiom inventory of this revision:
        hardness (in-section): qccf_hard, qcsd_ow_hard
        adversary termination (in-section): A_choose_ll, A_guess_ll
-       benign / mathematically-true facts: enumR_spec, enumR_odd_nonempty,
-         exists_filter_Et, enumHw_nonempty, Hw_unit
-       parameter conditions: r_gt0, l_ge0 (used in proofs); w_gt0, w_even,
-         uneven_w_half, r_prime, t_ge0, t_le_n (documentation: they justify
-         the benign axioms, see comments in place).
+       benign / mathematically-true facts: NONE
+       parameter conditions, used in proofs: r_gt0, l_ge0, w_gt0, w_even,
+         d_le_r, t_ge0, t_le_n
+       parameter conditions, existential form: Hw_unit (every weight-d
+         element is a unit; NOT derivable from r_prime/uneven_w_half —
+         counterexample r = 7 — it additionally encodes BIKE's choice
+         "2 is a primitive root mod r" and d < r; discharging it needs
+         F2[X] gcd/Bezout theory absent from the stdlib)
+       parameter conditions, documentation only: uneven_w_half, r_prime
+         (mathematical justification of Hw_unit).
    ==================================================================== *)
 
 require import AllCore IntDiv.
@@ -77,6 +68,7 @@ op n = r + r.  op d = w %/ 2.
                              (justifies invp_correct)
      t_ge0, t_le_n        => a weight-t error pair exists
                              (justifies exists_filter_Et)
+d_le_r
    r_ge3 (only needed by the removed decoder/alg2 material) is deleted. *)
 axiom r_gt0  : 0 < r.
 axiom l_ge0  : 0 <= l.
@@ -84,6 +76,9 @@ axiom w_gt0  : 0 < w.
 axiom w_even : 2 %| w.
 axiom uneven_w_half : !(2 %| d).
 axiom r_prime : prime r.
+(* Used in machine proofs from revision d: enumHw_nonempty (weight-d
+   witness needs d <= r). True for all BIKE parameter sets (d << r). *)
+axiom d_le_r : d <= r.
 axiom t_ge0  : 0 <= t.
 axiom t_le_n : t <= n.
 
@@ -129,16 +124,107 @@ op list_append_each ['a 'b] (s : 'a list) (u : 'b) =
 op double_list (s : 'a list) (u : 'b list) =
   with s = []      => []
   with s = x :: xs => list_append_each u x ++ double_list xs u.
-op enumR : R list = map polyLX (alltuples r Zp.DZmodP.Support.enum).
+  op enumR : R list = map polyLX (alltuples r Zp.DZmodP.Support.enum).
+
+(* Step A: polyLX is injective on length-r coefficient lists. *)
+lemma polyLX_inj (s1 s2 : Zp list) :          (* 型名が落ちたら Zp.zmod list *)
+  size s1 = r => size s2 = r => polyLX s1 = polyLX s2 => s1 = s2.
+proof.
+move=> h1 h2 heq.
+apply (eq_from_nth Zp.zero); first by rewrite h1 h2.
+move=> i hi.
+rewrite -(polyLXE s1 i) 1:/# -(polyLXE s2 i) 1:/#.
+by rewrite heq.
+qed.
+
+(* Step B: enumR is duplicate-free. *)
+lemma enumR_uniq : uniq enumR.
+proof.
+rewrite /enumR.
+apply map_inj_in_uniq.
++ move=> s1 s2 /alltuplesP [hs1 _] /alltuplesP [hs2 _].
+  by apply polyLX_inj; smt(r_gt0).
+by apply alltuples_uniq; exact Zp.DZmodP.Support.enum_uniq.
+qed.
+
+(* Step C: enumR is complete. *)
+lemma enumR_complete (x : R) : x \in enumR.
+proof.
+pose s := mkseq (fun (i : int) => x.[i]) r.
+have hsz : size s = r by rewrite size_mkseq; smt(r_gt0).
+have hmem : s \in alltuples r Zp.DZmodP.Support.enum.
++ apply/alltuplesP; split; first smt(r_gt0).
+  by apply/allP => z _; exact Zp.DZmodP.Support.enumP.
+have hpx : polyLX s = x.
++ apply/polyXnD1_eqP => i hi.
+  rewrite polyLXE 1:/# nth_mkseq 1:/# //.
+by rewrite /enumR; apply/mapP; exists s; rewrite hmem hpx.
+qed.
+
+(* Step D: the last benign axiom becomes a lemma. *)
+lemma enumR_spec (x : R) : count (pred1 x) enumR = 1.
+proof.
+by rewrite count_uniq_mem 1:enumR_uniq enumR_complete.
+qed.
+  
 op enumE_t = filter filter_Et (double_list enumR enumR).
-(* BENIGN AXIOM (mathematically true, not a hardness assumption):
-   enumR is a duplicate-free complete enumeration of R, i.e.
-   polyLX o (alltuples r) is a bijection onto polyXnD1.
-   Candidate discharge: finite_facts_WIP.ec §D. *)
-axiom enumR_spec (x : R) : count (pred1 x) enumR = 1.
 
 clone MFinite as RFinite with type t <- R, op Support.enum <- enumR proof *.
 realize Support.enum_spec. exact enumR_spec. qed.
+
+  (* Bridge: ham_weight of the asint image = number of nonzero entries. *)
+lemma ham_weight_count (s : Matrix.R list) :
+  ham_weight (RListToInt s) = count (fun (z : Matrix.R) => z <> Zp.zero) s.
+proof.
+elim: s => //= z s ih; rewrite ih.
+smt(Zp.zeroE Zp.asint_eq).
+qed.
+
+(* Bridge: ham_weight of a polynomial = number of nonzero coefficients
+   among indices 0..r-1. *)
+lemma ham_weight_coeff (x : R) :
+  ham_weight (polyToList x)
+  = count (fun (i : int) => x.[i] <> Zp.zero) (range 0 r).
+proof.
+rewrite /polyToList ham_weight_count /polyToVec /tolist.
+rewrite size_offunv.
+have -> : max 0 r = r by smt(r_gt0).
+rewrite count_map.
+apply eq_in_count => i /mem_range hi /=.
+rewrite /preim /=.
+  rewrite get_offunv 1:/#.
+by rewrite /rcoeff.
+qed.
+
+(* Witness factory: a polynomial of any weight k <= r exists. *)
+lemma weight_k_exists (k : int) :
+  0 <= k <= r => exists (x : R), ham_weight (polyToList x) = k.
+proof.
+move=> hk.
+pose s := mkseq (fun (i : int) => if i < k then Zp.one else Zp.zero) r.
+exists (polyLX s).
+rewrite ham_weight_coeff.
+have -> : count (fun (i : int) => (polyLX s).[i] <> Zp.zero) (range 0 r)
+        = count (fun (i : int) => i < k) (range 0 r).
++ apply eq_in_count => i /mem_range hi /=.
+  rewrite polyLXE 1:size_mkseq 1:/#.
+  rewrite nth_mkseq 1:/# /=.
+  smt(Zp.oneE Zp.zeroE).
+rewrite (range_cat k 0 r) 1,2:/# count_cat.
+have -> : count (fun (i : int) => i < k) (range 0 k) = k.
++ have hall : all (fun (i : int) => i < k) (range 0 k).
+  * by apply/allP => i /mem_range /#.
+  by move/all_count: hall => ->; rewrite size_range /#.
+have -> : count (fun (i : int) => i < k) (range k r) = 0.
++ have hno : !has (fun (i : int) => i < k) (range k r).
+  * by apply/hasPn => i /mem_range /#.
+  by smt(has_count count_ge0).
+by [].
+      qed.
+
+lemma mem_enumR (a : R) : a \in enumR.
+proof. exact enumR_complete. qed.
+
 
 op distribution_over_E_t : (R * R) distr = duniform enumE_t.
 
@@ -146,13 +232,28 @@ op poly_parity (x : R) : int = (ham_weight (polyToList x)) %% 2.
 op enumR_odd : R list = filter (fun (x : R) => poly_parity x = 1) enumR.
 op distribution_over_R_odd = duniform enumR_odd.
 
-(* BENIGN AXIOMS (mathematically true, not hardness assumptions):
-   - enumR_odd_nonempty: e.g. oner has Hamming weight 1 (odd).
-     Candidate discharge: finite_facts_WIP.ec §B.
-   - exists_filter_Et: a weight-t error pair exists since 0 <= t <= n = 2r
-     (t_ge0, t_le_n). Candidate discharge: finite_facts_WIP.ec §C. *)
-axiom enumR_odd_nonempty : enumR_odd <> [].
-axiom exists_filter_Et   : exists (x : R * R), filter_Et x.
+        (* Discharge of enumR_odd_nonempty: a weight-1 polynomial is odd. *)
+lemma enumR_odd_nonempty : enumR_odd <> [].
+proof.
+have [x hx] : exists (x : R), ham_weight (polyToList x) = 1.
++ by apply weight_k_exists; smt(r_gt0).
+apply/negP => h.
+have hmem : x \in enumR_odd.
++ rewrite /enumR_odd mem_filter.
+  smt(mem_enumR).
+by move: hmem; rewrite h.
+qed.
+
+(* Discharge of exists_filter_Et: split t = min t r + (t - min t r),
+   both parts in [0,r] since 0 <= t <= n = 2r (t_ge0, t_le_n). *)
+lemma exists_filter_Et : exists (x : R * R), filter_Et x.
+proof.
+have [x0 hx0] : exists (x : R), ham_weight (polyToList x) = min t r.
++ by apply weight_k_exists; smt(t_ge0 r_gt0).
+have [x1 hx1] : exists (x : R), ham_weight (polyToList x) = t - min t r.
++ by apply weight_k_exists; smt(t_ge0 t_le_n r_gt0).
+by exists (x0, x1); rewrite /filter_Et /= hx0 hx1 /#.
+qed.
 
 (* ====================================================================
    2. ROM: L : R×R -> M
@@ -176,11 +277,17 @@ module L = {
 op Hw_elem (x : R) : bool = ham_weight (polyToList x) = d.
 op enumHw : R list = filter Hw_elem enumR.
 
-(* BENIGN AXIOM (mathematically true): a weight-d polynomial exists,
-   since 1 <= d <= r (w_gt0, w_even give d >= 1; BIKE parameters give
-   d << r). Candidate discharge: finite_facts_WIP.ec §C (same sparse-
-   polynomial construction as exists_filter_Et). *)
-axiom enumHw_nonempty : enumHw <> [].
+(* Discharge of enumHw_nonempty: a weight-d polynomial exists
+   (1 <= d from w_gt0/w_even, d <= r from d_le_r). *)
+lemma enumHw_nonempty : enumHw <> [].
+proof.
+have [x hx] : exists (x : R), ham_weight (polyToList x) = d.
++ by apply weight_k_exists; smt(w_gt0 w_even d_le_r).
+apply/negP => h.
+have hmem : x \in enumHw.
++ by rewrite /enumHw mem_filter /Hw_elem hx /= mem_enumR.
+by move: hmem; rewrite h.
+qed.
 
 op dHw : R distr = duniform enumHw.
 
@@ -237,8 +344,7 @@ proof.
   elim: s => /= [|x xs ih]; first by rewrite /double_list.
   rewrite mem_cat mem_list_append_each ih; smt().
 qed.
-lemma mem_enumR (a : R) : a \in enumR.
-proof. have := RFinite.Support.enum_spec a; smt(count_ge0 has_count hasP). qed.
+
 lemma Et_complete (x : R * R) : filter_Et x => x \in enumE_t.
 proof.
   move=> hx; rewrite /enumE_t mem_filter hx /=.
@@ -338,7 +444,18 @@ qed.
 op fit (m : M) : M = offunv ((fun i => m.[i]), l).
 
 lemma size_fit (m : M) : size (fit m) = l.
-proof. by rewrite /fit size_offunv; smt(l_ge0). qed.
+    proof. by rewrite /fit size_offunv; smt(l_ge0). qed.
+
+(* D5 closure: fit is the identity on well-formed (length-l) messages,
+   so for adversaries returning messages in {0,1}^l, G0 = Table 13 G0. *)
+lemma fit_id (m : M) : size m = l => fit m = m.
+proof.
+move=> hm; rewrite /fit.
+apply/eq_vectorP; split.
++ by rewrite size_offunv hm; smt(l_ge0).
+move=> i; rewrite size_offunv => hi.
+by rewrite get_offunv 1:/#.
+qed.
 
 (* Self-equiv for keyGen (used by call in G0_G1 etc.). *)
 lemma keyGen_eq : equiv[Bike.keyGen ~ Bike.keyGen : true ==> ={res}].
